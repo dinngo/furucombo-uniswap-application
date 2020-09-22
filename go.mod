@@ -1,4 +1,4 @@
-module garage.dinngo.co/furucombo/furucombo-addresses
+module github.com/dinngodev/furucombo-uniswap-application
 
 go 1.12
 
