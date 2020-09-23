@@ -5,10 +5,8 @@ import (
 
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 
@@ -18,47 +16,42 @@ import (
 )
 
 const (
-	uniswapAPI   = "https://gentle-frost-9e74.uniswap.workers.dev/1/"
-	txsFileName  = "txs.txt"
-	jsonFileName = "affected_addresses.json"
+	uniswapAPI       = "https://gentle-frost-9e74.uniswap.workers.dev/1/"
+	txsFileName      = "txs.txt"
+	accountsFileName = "accounts.txt"
 )
-
-// Report represents affected addresses
-type Report struct {
-	Addresses []string `json:"addresses"`
-}
 
 func main() {
 	endpoint := os.Getenv("ENDPOINT")
 
-	senders := make(map[common.Address]struct{})
-	err := getSendersFromTxs(endpoint, senders)
+	senders := make([]common.Address, 0)
+	err := getSendersFromTxs(endpoint, &senders)
 	if err != nil {
 		panic(err)
 	}
 
-	report := new(Report)
-	if err := filterOutSenders(senders, report); err != nil {
+	accounts := make([]string, 0)
+	if err := filterOutSenders(&senders, &accounts); err != nil {
 		panic(err)
 	}
 
-	if err = outputJSON(report); err != nil {
+	if err = outputAccounts(&accounts); err != nil {
 		panic(err)
 	}
 }
 
-func getSendersFromTxs(endpoint string, senders map[common.Address]struct{}) error {
+func getSendersFromTxs(endpoint string, senders *[]common.Address) error {
 	client, err := ethclient.Dial(endpoint)
 	if err != nil {
 		return err
 	}
 
-	// txs.txt is derived from https://explore.duneanalytics.com/public/dashboards/Cw10tmbxQ09KemdZdbzkW9rFMWTsBdE3CWW27jIF
 	f, err := os.Open(txsFileName)
 	if err != nil {
 		return err
 	}
 
+	checkExisting := make(map[common.Address]struct{}, 0)
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		hash := common.HexToHash(scanner.Text())
@@ -76,8 +69,10 @@ func getSendersFromTxs(endpoint string, senders map[common.Address]struct{}) err
 		}
 		from := msg.From()
 
-		if _, ok := senders[from]; !ok {
-			senders[from] = struct{}{}
+		if _, ok := checkExisting[from]; !ok {
+			checkExisting[from] = struct{}{}
+			// Fill in senders
+			*senders = append(*senders, from)
 			fmt.Println("from: ", from.Hex(), hash.Hex())
 		}
 	}
@@ -85,8 +80,8 @@ func getSendersFromTxs(endpoint string, senders map[common.Address]struct{}) err
 	return nil
 }
 
-func filterOutSenders(senders map[common.Address]struct{}, report *Report) error {
-	for sender := range senders {
+func filterOutSenders(senders *[]common.Address, accounts *[]string) error {
+	for _, sender := range *senders {
 		resp, err := http.Get(uniswapAPI + sender.Hex())
 		if err != nil {
 			return err
@@ -94,7 +89,7 @@ func filterOutSenders(senders map[common.Address]struct{}, report *Report) error
 		defer resp.Body.Close()
 
 		if resp.StatusCode == http.StatusNotFound {
-			report.Addresses = append(report.Addresses, sender.Hex())
+			*accounts = append(*accounts, sender.Hex())
 			fmt.Println("address: ", sender.Hex())
 		}
 	}
@@ -102,14 +97,21 @@ func filterOutSenders(senders map[common.Address]struct{}, report *Report) error
 	return nil
 }
 
-func outputJSON(report *Report) error {
-	jsonBytes, err := json.MarshalIndent(report, "", "  ")
+func outputAccounts(accounts *[]string) error {
+	f, err := os.Create(accountsFileName)
 	if err != nil {
-		return nil
-	}
-
-	if err := ioutil.WriteFile(jsonFileName, jsonBytes, os.ModePerm); err != nil {
 		return err
+	}
+	defer f.Close()
+
+	for i, v := range *accounts {
+		if i != 0 {
+			f.WriteString("\n")
+		}
+		_, err := f.WriteString(v)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
