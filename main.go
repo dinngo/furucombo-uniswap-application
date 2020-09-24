@@ -104,11 +104,8 @@ func outputAccounts(accounts *[]string) error {
 	}
 	defer f.Close()
 
-	for i, v := range *accounts {
-		if i != 0 {
-			f.WriteString("\n")
-		}
-		_, err := f.WriteString(v)
+	for _, v := range *accounts {
+		_, err := f.WriteString(v + "\n")
 		if err != nil {
 			return err
 		}
